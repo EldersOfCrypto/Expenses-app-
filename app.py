@@ -10,6 +10,10 @@ from datetime import date
 
 load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 
+api_key = st.secrets.get("ANTHROPIC_API_KEY") if hasattr(st, "secrets") else None
+if not api_key:
+    api_key = os.getenv("ANTHROPIC_API_KEY")
+
 EXPENSE_CATEGORIES = [
     "Rent", "Utilities", "Payroll", "Food & Beverages", "Supplies",
     "Equipment", "Marketing", "Transportation", "Bank Fees", "Taxes",
@@ -27,7 +31,7 @@ FIXED_CATEGORIES    = {"Rent", "Insurance", "Software & Subscriptions", "Bank Fe
 OTHER_CATEGORIES    = {"Other Expense", "Other Income"}
 LOCKS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "locked_periods.json")
 
-client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+client = anthropic.Anthropic(api_key=api_key)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
