@@ -1,0 +1,6 @@
+streamlit
+anthropic
+pdfplumber
+pandas
+openpyxl
+python-dotenv
