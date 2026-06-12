@@ -147,7 +147,7 @@ def find_duplicates(df_new, df_existing):
 
 
 # ── App ───────────────────────────────────────────────────────────────────────
-st.set_page_config(page_title="Business Expenses Tracker", layout="wide")
+st.set_page_config(page_title="Business Expenses Tracker")
 st.title("Business Expenses Tracker")
 
 for key, default in [
@@ -316,16 +316,18 @@ if not st.session_state.transactions.empty:
         st.warning(f"⚠️ {review_count} transaction(s) are in 'Other Expense' or 'Other Income' and need proper categorization.")
 
     # Metrics row 1
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2 = st.columns(2)
     col1.metric("Real Expenses", f"${real_expenses:,.2f}", help="Excludes transfers & card payments")
     col2.metric("Real Income",   f"${real_income:,.2f}",   help="Excludes incoming transfers")
+    col3, col4 = st.columns(2)
     col3.metric("Net Balance",   f"${net:,.2f}", delta=f"{'+ ' if net >= 0 else ''}{net:,.2f}")
     col4.metric("Transfers (noise)", f"${transfers_total:,.2f}", help="Inter-account transfers and card payments")
 
     # Metrics row 2 — Fixed vs Variable
-    col5, col6, col7, col8 = st.columns(4)
-    col5.metric("Fixed Costs",    f"${fixed_exp:,.2f}",    help=f"Rent, Insurance, Bank Fees, Software, Professional Services")
+    col5, col6 = st.columns(2)
+    col5.metric("Fixed Costs",    f"${fixed_exp:,.2f}",    help="Rent, Insurance, Bank Fees, Software, Professional Services")
     col6.metric("Variable Costs", f"${variable_exp:,.2f}", help="All other real expenses")
+    col7, col8 = st.columns(2)
     col7.metric("Fixed %",    f"{(fixed_exp/real_expenses*100):.1f}%"    if real_expenses > 0 else "—")
     col8.metric("Variable %", f"{(variable_exp/real_expenses*100):.1f}%" if real_expenses > 0 else "—")
 
@@ -338,7 +340,7 @@ if not st.session_state.transactions.empty:
         if sort_state_key not in st.session_state:
             st.session_state[sort_state_key] = ("original", False)
         cur_col, cur_asc = st.session_state[sort_state_key]
-        s1, s2, s3, s4 = st.columns([1.2, 1.2, 1.2, 4])
+        s1, s2, s3, s4 = st.columns([1, 1, 1, 1])
 
         if s1.button("Date  ↺", key=f"{sort_state_key}_btn_date", use_container_width=True):
             st.session_state[sort_state_key] = ("original", False)
