@@ -658,24 +658,43 @@ if not st.session_state.transactions.empty:
             edited_inc["amount"] = edited_inc["amount"].abs() * -1
             results.append(edited_inc)
 
-        # Transfers (collapsed)
+        # Transfers (collapsed, editable)
         tr_combined = pd.concat([t_out, t_in], ignore_index=True)
         if not tr_combined.empty:
             tr_out_tot = t_out["amount"].abs().sum()
             tr_in_tot  = t_in["amount"].abs().sum()
             with st.expander(f"🔄 Transfers — Out: ${tr_out_tot:,.2f} · In: ${tr_in_tot:,.2f} · excluded from totals"):
-                st.caption("Inter-account transfers and card payments — not counted to avoid double-counting.")
+                st.caption("These are excluded from totals. If a transfer is actually real income or an expense, change its category below and it will move to the right section.")
                 tr_disp = tr_combined.copy()
                 tr_disp["amount"] = tr_disp["amount"].abs()
                 tr_disp["direction"] = tr_combined["type"].map(
                     {"expense": "→ Out", "income": "← In"}
                 )
-                st.dataframe(
-                    tr_disp[["direction", "date", "description", "amount", "bank"]],
+                edited_tr = st.data_editor(
+                    tr_disp[["tx_id", "direction", "date", "description", "amount", "category", "bank", "notes"]],
                     use_container_width=True, hide_index=True,
-                    column_config={"amount": st.column_config.NumberColumn("Amount", format="$%.2f")},
+                    key=f"tr_{key}",
+                    column_config={
+                        "tx_id":       None,
+                        "direction":   st.column_config.TextColumn("Dir.", width="small"),
+                        "date":        st.column_config.TextColumn("Date", width="small"),
+                        "description": st.column_config.TextColumn("Description"),
+                        "amount":      st.column_config.NumberColumn("Amount", format="$%.2f"),
+                        "category":    st.column_config.SelectboxColumn("Category", options=ALL_CATEGORIES, required=True),
+                        "bank":        st.column_config.TextColumn("Bank", width="small"),
+                        "notes":       st.column_config.TextColumn("Notes"),
+                    },
                 )
-            results += [t_out, t_in]
+                # Restore signed amounts and update type from new category
+                edited_tr["amount"] = edited_tr.apply(
+                    lambda r: -abs(r["amount"]) if r["category"] in INCOME_CATEGORIES else abs(r["amount"]),
+                    axis=1,
+                )
+                edited_tr["type"] = edited_tr["category"].apply(
+                    lambda c: "income" if c in INCOME_CATEGORIES else "expense"
+                )
+                edited_tr = edited_tr.drop(columns=["direction"], errors="ignore")
+            results.append(edited_tr)
 
         return pd.concat(results, ignore_index=True) if results else sec_df
 
