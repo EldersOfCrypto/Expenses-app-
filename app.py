@@ -57,12 +57,14 @@ client = anthropic.Anthropic(api_key=api_key) if api_key else None
 # ── Persistence ───────────────────────────────────────────────────────────────
 def load_transactions() -> pd.DataFrame:
     if TRANSACTIONS_FILE.exists():
-        df = pd.read_csv(TRANSACTIONS_FILE, dtype={"notes": str, "tx_id": str})
-        for col, val in [("notes", ""), ("bank", ""), ("source", ""), ("tx_id", "")]:
+        df = pd.read_csv(TRANSACTIONS_FILE, dtype={"notes": str, "tx_id": str, "period": str})
+        for col, val in [("notes", ""), ("bank", ""), ("source", ""), ("tx_id", ""), ("period", "")]:
             if col not in df.columns:
                 df[col] = val
-        df["notes"] = df["notes"].fillna("")
+        df["notes"]  = df["notes"].fillna("")
+        df["period"] = df["period"].fillna("")
         df = _ensure_ids(df)
+        df = _ensure_period(df)
         return df
     return pd.DataFrame()
 
@@ -72,6 +74,9 @@ def save_transactions(df: pd.DataFrame):
     elif TRANSACTIONS_FILE.exists():
         TRANSACTIONS_FILE.unlink()
 
+def parse_date_col(series):
+    return pd.to_datetime(series, format="%d/%m/%Y", dayfirst=True, errors="coerce")
+
 def _ensure_ids(df: pd.DataFrame) -> pd.DataFrame:
     if "tx_id" not in df.columns:
         df["tx_id"] = [str(uuid.uuid4())[:8] for _ in range(len(df))]
@@ -80,6 +85,29 @@ def _ensure_ids(df: pd.DataFrame) -> pd.DataFrame:
         df.loc[mask, "tx_id"] = [str(uuid.uuid4())[:8] for _ in range(mask.sum())]
     return df
 
+def _ensure_period(df: pd.DataFrame) -> pd.DataFrame:
+    if "period" not in df.columns:
+        df["period"] = ""
+    mask = df["period"].isna() | (df["period"] == "")
+    if mask.any():
+        dates = parse_date_col(df.loc[mask, "date"])
+        df.loc[mask, "period"] = dates.dt.strftime("%Y-%m").fillna("")
+    return df
+
+def _period_options() -> list:
+    today = date.today()
+    opts = set()
+    for i in range(18):
+        d = (today.replace(day=1) - timedelta(days=i * 28)).replace(day=1)
+        opts.add(d.strftime("%Y-%m"))
+    return sorted(opts)
+
+def _fmt_period(p: str) -> str:
+    try:
+        return pd.to_datetime(p, format="%Y-%m").strftime("%b %Y")
+    except Exception:
+        return p
+
 def _apply_edits_back(full_df: pd.DataFrame, edited_df: pd.DataFrame) -> pd.DataFrame:
     """Merge edited rows back into full_df by tx_id (handles date filtering)."""
     if edited_df.empty or "tx_id" not in edited_df.columns:
@@ -87,7 +115,7 @@ def _apply_edits_back(full_df: pd.DataFrame, edited_df: pd.DataFrame) -> pd.Data
     for _, row in edited_df.iterrows():
         mask = full_df["tx_id"] == row["tx_id"]
         if mask.any():
-            for col in ["category", "notes", "type", "description", "amount"]:
+            for col in ["category", "notes", "type", "description", "amount", "period"]:
                 if col in row.index:
                     full_df.loc[mask, col] = row[col]
     return full_df
@@ -163,9 +191,6 @@ Statement:
     return result["transactions"], result["statement_type"], result.get("bank_name", "Unknown")
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
-def parse_date_col(series):
-    return pd.to_datetime(series, format="%d/%m/%Y", dayfirst=True, errors="coerce")
-
 def export_excel(df: pd.DataFrame) -> bytes:
     df_exp = df[df["type"] == "expense"]
     df_inc = df[df["type"] == "income"]
@@ -191,7 +216,10 @@ def export_excel(df: pd.DataFrame) -> bytes:
         tmp = df.copy()
         tmp["_date"] = parse_date_col(tmp["date"])
         tmp = tmp.dropna(subset=["_date"])
-        tmp["Month"] = tmp["_date"].dt.to_period("M").astype(str)
+        tmp["Month"] = tmp["period"].where(
+            tmp["period"].notna() & (tmp["period"] != ""),
+            tmp["_date"].dt.strftime("%Y-%m")
+        )
         real_t = tmp[~tmp["category"].isin(TRANSFER_CATEGORIES)]
         me = real_t[real_t["type"] == "expense"].groupby("Month")["amount"].sum()
         mi = real_t[real_t["type"] == "income"].groupby("Month")["amount"].apply(lambda x: abs(x.sum()))
@@ -311,6 +339,7 @@ with st.sidebar:
                         if "notes" not in df_new.columns:
                             df_new["notes"] = ""
                         df_new = _ensure_ids(df_new)
+                        df_new = _ensure_period(df_new)
 
                         dupes = find_duplicates(df_new, st.session_state.transactions)
                         if dupes:
@@ -357,6 +386,7 @@ with st.sidebar:
                         "bank":        m_pay,
                         "notes":       m_notes,
                         "tx_id":       str(uuid.uuid4())[:8],
+                        "period":      m_date.strftime("%Y-%m"),
                     }])
                     st.session_state.transactions = (
                         row if st.session_state.transactions.empty
@@ -606,6 +636,8 @@ if not st.session_state.transactions.empty:
             "tx_id":       None,
             "type":        None,
             "date":        st.column_config.TextColumn("Date", width="small"),
+            "period":      st.column_config.SelectboxColumn("Reporting Period", options=PERIOD_OPTIONS,
+                               help="Change this to move the transaction to a different month in reports"),
             "description": st.column_config.TextColumn("Description"),
             "amount":      st.column_config.NumberColumn("Amount (MXN)", format="$%,.2f"),
             "category":    st.column_config.SelectboxColumn("Category", options=cats, required=True),
@@ -614,7 +646,8 @@ if not st.session_state.transactions.empty:
             "notes":       st.column_config.TextColumn("Notes ✏️", help="Add a memo for this transaction"),
         }
 
-    COL_ORDER = ["date", "description", "amount", "category", "bank", "source", "notes"]
+    PERIOD_OPTIONS = _period_options()
+    COL_ORDER = ["period", "date", "description", "amount", "category", "bank", "source", "notes"]
 
     # ── Section renderer ──────────────────────────────────────────────────────
     def render_section(sec_df: pd.DataFrame, key: str):
@@ -766,7 +799,11 @@ if not st.session_state.transactions.empty:
         df_t = df.copy()
         df_t["_date"] = parse_date_col(df_t["date"])
         df_t = df_t.dropna(subset=["_date"])
-        df_t["Month"] = df_t["_date"].dt.to_period("M").astype(str)
+        # Use reporting period if set, otherwise fall back to transaction date month
+        df_t["Month"] = df_t["period"].where(
+            df_t["period"].notna() & (df_t["period"] != ""),
+            df_t["_date"].dt.strftime("%Y-%m")
+        )
         real_t = df_t[~df_t["category"].isin(TRANSFER_CATEGORIES)]
 
         me = real_t[real_t["type"] == "expense"].groupby("Month")["amount"].sum()
