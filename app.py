@@ -463,6 +463,46 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
+# ── Transfers Fragment (no full-page rerun) ───────────────────────────────────
+@st.fragment
+def transfers_fragment(tr_combined: pd.DataFrame, tr_out_tot: float, tr_in_tot: float, key: str):
+    with st.expander(f"🔄 Transfers — Out: ${tr_out_tot:,.2f} · In: ${tr_in_tot:,.2f} · excluded from totals"):
+        st.caption("Tick any transfer that is actually real income, then click the button — no page refresh.")
+        tr_disp = tr_combined.copy()
+        tr_disp["amount"]    = tr_disp["amount"].abs()
+        tr_disp["direction"] = tr_combined["type"].map({"expense": "→ Out", "income": "← In"})
+        tr_disp.insert(0, "Move?", False)
+
+        edited = st.data_editor(
+            tr_disp[["Move?", "direction", "date", "description", "amount", "bank", "tx_id"]],
+            column_config={
+                "Move?":       st.column_config.CheckboxColumn("Move?", default=False, width="small"),
+                "tx_id":       None,
+                "direction":   st.column_config.TextColumn("Dir.", width="small"),
+                "date":        st.column_config.TextColumn("Date", width="small"),
+                "description": st.column_config.TextColumn("Description"),
+                "amount":      st.column_config.NumberColumn("Amount", format="$%.2f"),
+                "bank":        st.column_config.TextColumn("Bank", width="small"),
+            },
+            hide_index=True, use_container_width=True,
+            key=f"tr_edit_{key}",
+        )
+
+        if st.button("💰 Move selected to Sales Revenue", key=f"tr_btn_{key}", type="primary"):
+            selected_ids = edited[edited["Move?"] == True]["tx_id"].tolist()
+            if selected_ids:
+                full = st.session_state.transactions.copy()
+                for tid in selected_ids:
+                    mask = full["tx_id"] == tid
+                    full.loc[mask, "category"] = "Sales Revenue"
+                    full.loc[mask, "type"]     = "income"
+                    full.loc[mask, "amount"]   = full.loc[mask, "amount"].abs() * -1
+                st.session_state.transactions = full
+                save_transactions(full)
+                st.success(f"✅ Moved {len(selected_ids)} transfer(s) to Sales Revenue!")
+            else:
+                st.warning("Check at least one transfer first.")
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 if not st.session_state.transactions.empty:
     df = st.session_state.transactions.copy()
@@ -658,43 +698,13 @@ if not st.session_state.transactions.empty:
             edited_inc["amount"] = edited_inc["amount"].abs() * -1
             results.append(edited_inc)
 
-        # Transfers (collapsed, editable)
+        # Transfers (collapsed, fragment — no full-page rerun)
         tr_combined = pd.concat([t_out, t_in], ignore_index=True)
         if not tr_combined.empty:
             tr_out_tot = t_out["amount"].abs().sum()
             tr_in_tot  = t_in["amount"].abs().sum()
-            with st.expander(f"🔄 Transfers — Out: ${tr_out_tot:,.2f} · In: ${tr_in_tot:,.2f} · excluded from totals"):
-                st.caption("These are excluded from totals. If a transfer is actually real income or an expense, change its category below and it will move to the right section.")
-                tr_disp = tr_combined.copy()
-                tr_disp["amount"] = tr_disp["amount"].abs()
-                tr_disp["direction"] = tr_combined["type"].map(
-                    {"expense": "→ Out", "income": "← In"}
-                )
-                edited_tr = st.data_editor(
-                    tr_disp[["tx_id", "direction", "date", "description", "amount", "category", "bank", "notes"]],
-                    use_container_width=True, hide_index=True,
-                    key=f"tr_{key}",
-                    column_config={
-                        "tx_id":       None,
-                        "direction":   st.column_config.TextColumn("Dir.", width="small"),
-                        "date":        st.column_config.TextColumn("Date", width="small"),
-                        "description": st.column_config.TextColumn("Description"),
-                        "amount":      st.column_config.NumberColumn("Amount", format="$%.2f"),
-                        "category":    st.column_config.SelectboxColumn("Category", options=ALL_CATEGORIES, required=True),
-                        "bank":        st.column_config.TextColumn("Bank", width="small"),
-                        "notes":       st.column_config.TextColumn("Notes"),
-                    },
-                )
-                # Restore signed amounts and update type from new category
-                edited_tr["amount"] = edited_tr.apply(
-                    lambda r: -abs(r["amount"]) if r["category"] in INCOME_CATEGORIES else abs(r["amount"]),
-                    axis=1,
-                )
-                edited_tr["type"] = edited_tr["category"].apply(
-                    lambda c: "income" if c in INCOME_CATEGORIES else "expense"
-                )
-                edited_tr = edited_tr.drop(columns=["direction"], errors="ignore")
-            results.append(edited_tr)
+            transfers_fragment(tr_combined, tr_out_tot, tr_in_tot, key)
+            results += [t_out, t_in]
 
         return pd.concat(results, ignore_index=True) if results else sec_df
 
